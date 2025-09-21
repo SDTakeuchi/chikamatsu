@@ -1,7 +1,6 @@
 package process
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -31,16 +30,19 @@ type Process struct {
 	status      ProcStatus
 	memoryUsage uint64
 	cpuUsage    float64
-	logs        []string
-	mu          sync.RWMutex
+	//log         []string
+	stdout io.ReadCloser
+	stderr io.ReadCloser
+	mu     sync.RWMutex
 }
 
-func (p *Process) Pid() int            { return p.pid }
-func (p *Process) Port() int32         { return p.port }
-func (p *Process) MemoryUsage() uint64 { return p.memoryUsage }
-func (p *Process) CPUUsage() float64   { return p.cpuUsage }
-func (p *Process) Status() ProcStatus  { return p.status }
-func (p *Process) Logs() []string      { return p.logs }
+func (p *Process) Pid() int              { return p.pid }
+func (p *Process) Port() int32           { return p.port }
+func (p *Process) MemoryUsage() uint64   { return p.memoryUsage }
+func (p *Process) CPUUsage() float64     { return p.cpuUsage }
+func (p *Process) Status() ProcStatus    { return p.status }
+func (p *Process) Stdout() io.ReadCloser { return p.stdout }
+func (p *Process) Stderr() io.ReadCloser { return p.stderr }
 
 func NewProcess(path, command string) *Process {
 	return &Process{
@@ -86,12 +88,11 @@ func (p *Process) Run() (err error) {
 	}
 
 	// Create pipes for stdout and stderr
-	var stdout, stderr io.ReadCloser
-	stdout, err = cmd.StdoutPipe()
+	p.stdout, err = cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("failed to get stdout pipe: %w", err)
 	}
-	stderr, err = cmd.StderrPipe()
+	p.stderr, err = cmd.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("failed to get stderr pipe: %w", err)
 	}
@@ -102,33 +103,34 @@ func (p *Process) Run() (err error) {
 	if err = cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start command %s: %w", p.command, err)
 	}
+
 	p.mu.Lock()
 	p.pid = cmd.Process.Pid
 	p.mu.Unlock()
 
-	// Start goroutines to read stdout and stderr
-	go p.readOutput(stdout, "stdout")
-	go p.readOutput(stderr, "stderr")
-
 	return nil
 }
 
-// readOutput reads from the given reader and adds lines to Process.logs
-func (p *Process) readOutput(reader io.Reader, stream string) {
+/*
+func (p *Process) storeLogs() {
+	go p.scanLog(p.stdout)
+	go p.scanLog(p.stderr)
+}
+
+func (p *Process) scanLog(reader io.ReadCloser) {
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
-		line := scanner.Text()
-		logEntry := fmt.Sprintf("%s: %s", stream, line)
-
-		p.mu.Lock()
-		p.logs = append(p.logs, logEntry)
-		// Keep only the last maxLogLines entries
-		if len(p.logs) > maxLogLines {
-			p.logs = p.logs[len(p.logs)-maxLogLines:]
+		scanned := scanner.Text()
+		p.mu.RLock()
+		if len(p.log) >= maxLogLines {
+			p.log = append(p.log[len(p.log)-maxLogLines:], scanned+"\n")
+		} else {
+			p.log = append(p.log, scanned+"\n")
 		}
-		p.mu.Unlock()
+		p.mu.RUnlock()
 	}
 }
+*/
 
 func (p *Process) UpdateStats(ctx context.Context) error {
 	p.mu.Lock()

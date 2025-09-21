@@ -1,12 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/SDTakeuchi/chikamatsu/process"
@@ -18,20 +19,31 @@ import (
 const refreshInterval = 500 * time.Millisecond
 
 var (
-	loggingProcess Process         // process to log the output
-	focusedView    tview.Primitive // focused view
+	focusedView tview.Primitive // focused view
+
+	processView = tview.NewTable()
+	logView     = tview.NewTextView()
 )
+
+func init() {
+	processView.SetBorder(true).SetTitle("Processes")
+	logView.SetText("chikamatsu started...\n").SetBorder(true).SetTitle("Log")
+	focusedView = processView
+}
 
 type Process interface {
 	// Getters
+
 	Pid() int
 	Port() int32
 	MemoryUsage() uint64 // in bytes
 	CPUUsage() float64   // in percentage
 	Status() process.ProcStatus
-	Logs() []string
+	Stdout() io.ReadCloser
+	Stderr() io.ReadCloser
 
 	// Methods
+
 	Run() error                            // start the process
 	UpdateStats(ctx context.Context) error // update the stats of the process
 	Terminate(ctx context.Context) error   // terminate the process
@@ -46,23 +58,27 @@ func newApp() *App {
 	return &App{view: tview.NewApplication()}
 }
 
-func currentTimeString() string {
-	return time.Now().Format("Current time is 15:04:05")
+func (app *App) updateLog(textView *tview.TextView, procs []Process) {
+	for _, p := range procs {
+		go app.update(textView, p.Stdout(), p.Pid())
+		go app.update(textView, p.Stderr(), p.Pid())
+	}
+
+	ticker := time.NewTicker(refreshInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		textView.ScrollToEnd()
+	}
 }
 
-func (app *App) updateLog(textView *tview.TextView) {
-	logs := []string{}
-	for {
-		if loggingProcess != nil && loggingProcess.Logs() != nil {
-			if slices.Equal(logs, loggingProcess.Logs()) {
-				time.Sleep(refreshInterval)
-				continue
-			}
+func (app *App) update(textView *tview.TextView, reader io.ReadCloser, pid int) {
+	if reader == nil {
+		return
+	}
 
-			textView.SetText(strings.Join(loggingProcess.Logs(), "\n"))
-		} else {
-			time.Sleep(refreshInterval)
-		}
+	scanner := bufio.NewScanner(reader)
+	for scanner.Scan() {
+		textView.Write([]byte(fmt.Sprintf("[%d] %s\n", pid, scanner.Text())))
 	}
 }
 
@@ -71,15 +87,19 @@ func (app *App) tableView(table *tview.Table, processes []Process) {
 	slices.SortFunc(processes, func(i, j Process) int { return int(i.Pid() - j.Pid()) })
 
 	table.
-		Select(0, 0).
+		Select(1, 0).
 		SetSelectable(true, false).
-		SetSelectedFunc(func(row, col int) {
-			if row == 0 {
-				// do nothing for header
-				return
-			}
-			loggingProcess = processes[row-1]
-		}).
+		/*
+			SetSelectedFunc(func(row, col int) {
+				if row == 0 || focusedProcess.Pid() == processes[row-1].Pid() {
+					// do nothing when row=0 where header is located
+					// or when the selected process is the same as the focused process
+					return
+				}
+				logView.Clear()
+				focusedProcess = processes[row-1]
+			}).
+		*/
 		SetInputCapture(
 			func(event *tcell.EventKey) *tcell.EventKey {
 				row, _ := table.GetSelection()
@@ -104,6 +124,8 @@ func (app *App) tableView(table *tview.Table, processes []Process) {
 						}
 					}
 					proc.Run()
+					go app.update(logView, proc.Stdout(), proc.Pid())
+					go app.update(logView, proc.Stderr(), proc.Pid())
 				}
 				return event
 			},
@@ -144,29 +166,23 @@ func main() {
 		}
 	}
 
-	table := tview.NewTable()
-	table.SetBorder(true).SetTitle("Processes")
-	go app.tableView(table, processes)
+	go app.tableView(processView, processes)
+	go app.updateLog(logView, processes)
 
-	textView := tview.NewTextView()
-	textView.SetText(currentTimeString())
-	textView.SetBorder(true).SetTitle("Log")
-	go app.updateLog(textView)
-
-	flex := tview.NewFlex().
+	flexView := tview.NewFlex().
 		SetDirection(tview.FlexRow).
-		AddItem(table, 0, 1, true).
-		AddItem(textView, 0, 2, false)
+		AddItem(processView, 0, 1, true).
+		AddItem(logView, 0, 2, false)
 
-	app.root = flex
+	app.root = flexView
 
 	app.view.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyTab:
-			if focusedView == table {
-				focusedView = textView
+			if focusedView == processView {
+				focusedView = logView
 			} else {
-				focusedView = table
+				focusedView = processView
 			}
 			app.view.SetFocus(focusedView)
 		case tcell.KeyCtrlC:
