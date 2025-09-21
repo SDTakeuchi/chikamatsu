@@ -42,6 +42,9 @@ func (ws *WebServer) healthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("health check")
+	log.Printf("ip: %s", r.RemoteAddr)
+
 	uptime := time.Since(ws.startTime)
 	response := HealthResponse{
 		Status:    "healthy",

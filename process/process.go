@@ -36,6 +36,7 @@ type Process struct {
 }
 
 func (p *Process) Pid() int            { return p.pid }
+func (p *Process) Port() int32         { return p.port }
 func (p *Process) MemoryUsage() uint64 { return p.memoryUsage }
 func (p *Process) CPUUsage() float64   { return p.cpuUsage }
 func (p *Process) Status() ProcStatus  { return p.status }
@@ -164,6 +165,9 @@ func (p *Process) Terminate(ctx context.Context) error {
 
 	p.mu.Lock()
 	p.status = ProcStatusStopped
+	p.pid = 0
+	p.memoryUsage = 0
+	p.cpuUsage = 0
 	p.mu.Unlock()
 
 	return nil

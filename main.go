@@ -6,6 +6,7 @@ import (
 	"log"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/SDTakeuchi/chikamatsu/process"
@@ -16,15 +17,24 @@ import (
 
 const refreshInterval = 500 * time.Millisecond
 
+var (
+	loggingProcess Process         // process to log the output
+	focusedView    tview.Primitive // focused view
+)
+
 type Process interface {
+	// Getters
 	Pid() int
+	Port() int32
 	MemoryUsage() uint64 // in bytes
 	CPUUsage() float64   // in percentage
 	Status() process.ProcStatus
 	Logs() []string
-	Run() error
-	UpdateStats(ctx context.Context) error
-	Terminate(ctx context.Context) error
+
+	// Methods
+	Run() error                            // start the process
+	UpdateStats(ctx context.Context) error // update the stats of the process
+	Terminate(ctx context.Context) error   // terminate the process
 }
 
 type App struct {
@@ -41,31 +51,66 @@ func currentTimeString() string {
 }
 
 func (app *App) updateTime(textView *tview.TextView) {
-	ticker := time.NewTicker(refreshInterval)
-	for range ticker.C {
-		app.view.QueueUpdateDraw(func() {
-			textView.SetText(currentTimeString())
-		})
+	logs := []string{}
+	for {
+		if loggingProcess != nil && loggingProcess.Logs() != nil {
+			if slices.Equal(logs, loggingProcess.Logs()) {
+				time.Sleep(refreshInterval)
+				continue
+			}
+
+			app.view.QueueUpdateDraw(func() {
+				textView.
+					SetText(strings.Join(loggingProcess.Logs(), "\n"))
+			})
+		} else {
+			time.Sleep(refreshInterval)
+		}
 	}
 }
 
 func (app *App) tableView(table *tview.Table, processes []Process) {
+	// sort processes by PID to fix the order of the processes
 	slices.SortFunc(processes, func(i, j Process) int { return int(i.Pid() - j.Pid()) })
 
 	table.
 		Select(0, 0).
-		SetDoneFunc(func(key tcell.Key) {
-			switch key {
-			case tcell.KeyCtrlC:
-				app.view.Stop()
-			case tcell.KeyEnter:
-				table.SetSelectable(true, false)
-			}
-		}).
+		SetSelectable(true, false).
 		SetSelectedFunc(func(row, col int) {
-			table.GetCell(row, col).SetTextColor(tcell.ColorLime)
-			table.SetSelectable(false, false)
-		})
+			if row == 0 {
+				// do nothing for header
+				return
+			}
+			loggingProcess = processes[row-1]
+		}).
+		SetInputCapture(
+			func(event *tcell.EventKey) *tcell.EventKey {
+				row, _ := table.GetSelection()
+				if row == 0 {
+					// do nothing for header
+					return event
+				}
+
+				proc := processes[row-1]
+
+				switch event.Key() {
+				case tcell.KeyCtrlT:
+					// terminate selected process
+					proc.Terminate(context.Background())
+				case tcell.KeyCtrlR:
+					// restart selected process
+					if proc.Status() == process.ProcStatusRunning {
+						err := proc.Terminate(context.Background())
+						if err != nil {
+							// do nothing
+							return event
+						}
+					}
+					proc.Run()
+				}
+				return event
+			},
+		)
 
 	// header
 	table.SetCell(0, 0, tview.NewTableCell("PID"))
@@ -97,6 +142,7 @@ func main() {
 
 	processes := []Process{
 		process.NewProcess("foo", "go run main.go webserver.go"),
+		process.NewProcess("test", "go run main.go"),
 	}
 	for _, proc := range processes {
 		if err := proc.Run(); err != nil {
@@ -122,6 +168,13 @@ func main() {
 
 	app.view.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
+		case tcell.KeyTab:
+			if focusedView == table {
+				focusedView = textView
+			} else {
+				focusedView = table
+			}
+			app.view.SetFocus(focusedView)
 		case tcell.KeyCtrlC:
 			for _, proc := range processes {
 				proc.Terminate(context.Background())
