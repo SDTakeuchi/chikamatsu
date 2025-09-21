@@ -50,7 +50,7 @@ func currentTimeString() string {
 	return time.Now().Format("Current time is 15:04:05")
 }
 
-func (app *App) updateTime(textView *tview.TextView) {
+func (app *App) updateLog(textView *tview.TextView) {
 	logs := []string{}
 	for {
 		if loggingProcess != nil && loggingProcess.Logs() != nil {
@@ -59,10 +59,7 @@ func (app *App) updateTime(textView *tview.TextView) {
 				continue
 			}
 
-			app.view.QueueUpdateDraw(func() {
-				textView.
-					SetText(strings.Join(loggingProcess.Logs(), "\n"))
-			})
+			textView.SetText(strings.Join(loggingProcess.Logs(), "\n"))
 		} else {
 			time.Sleep(refreshInterval)
 		}
@@ -154,7 +151,7 @@ func main() {
 	textView := tview.NewTextView()
 	textView.SetText(currentTimeString())
 	textView.SetBorder(true).SetTitle("Log")
-	go app.updateTime(textView)
+	go app.updateLog(textView)
 
 	flex := tview.NewFlex().
 		SetDirection(tview.FlexRow).
