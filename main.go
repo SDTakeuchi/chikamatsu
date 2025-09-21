@@ -120,12 +120,9 @@ func (app *App) tableView(table *tview.Table, processes []Process) {
 
 	ticker := time.NewTicker(refreshInterval)
 	for range ticker.C {
-		for _, proc := range processes {
-			proc.UpdateStats(context.Background())
-		}
-
 		app.view.QueueUpdateDraw(func() {
 			for i, proc := range processes {
+				proc.UpdateStats(context.Background())
 				i++ // increment to skip header
 
 				table.SetCell(i, 0, tview.NewTableCell(strconv.Itoa(int(proc.Pid()))))
