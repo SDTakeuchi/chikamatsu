@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"github.com/SDTakeuchi/chikamatsu/process"
 	"slices"
 	"strconv"
 	"time"
+
+	"github.com/SDTakeuchi/chikamatsu/process"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -95,8 +96,7 @@ func main() {
 	app := newApp()
 
 	processes := []Process{
-		process.NewProcess("/Users/takeuchi/work/card/tsubasa-backend", "make run_api_server"),
-		process.NewProcess("/Users/takeuchi/work/card/card-proc-mng/prototype/foo", "go run main.go webserver.go"),
+		process.NewProcess("foo", "go run main.go webserver.go"),
 	}
 	for _, proc := range processes {
 		if err := proc.Run(); err != nil {
